@@ -1,0 +1,62 @@
+services:
+  # HDFS NameNode
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64 # Emulate AMD64 on Apple Silicon
+    container_name: hdfs_namenode
+    hostname: namenode
+    environment:
+      - CLUSTER_NAME=real-estate-documents-cluster
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - CORE_CONF_hadoop_http_staticuser_user=root
+      - HDFS_CONF_dfs_replication=1
+      - HDFS_CONF_dfs_webhdfs_enabled=true
+      - HDFS_CONF_dfs_permissions_enabled=false
+      - HDFS_CONF_dfs_datanode_use_datanode_hostname=true
+      - HDFS_CONF_dfs_client_use_datanode_hostname=true
+    ports:
+      - "9870:9870" # NameNode Web UI
+      - "9000:9000" # HDFS RPC
+    volumes:
+      - hdfs_namenode_data:/hadoop/dfs/name
+    networks:
+      - hdfs_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # HDFS DataNode
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64 # Emulate AMD64 on Apple Silicon
+    container_name: hdfs_datanode
+    hostname: datanode
+    environment:
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+      - HDFS_CONF_dfs_replication=1
+      - HDFS_CONF_dfs_datanode_use_datanode_hostname=true
+      - HDFS_CONF_dfs_client_use_datanode_hostname=true
+    ports:
+      - "9864:9864" # DataNode Web UI
+      - "9866:9866" # DataNode IPC
+    volumes:
+      - hdfs_datanode_data:/hadoop/dfs/data
+    networks:
+      - hdfs_network
+    depends_on:
+      namenode:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  hdfs_namenode_data:
+  hdfs_datanode_data:
+
+networks:
+  hdfs_network:
+    driver: bridge
+    name: hdfs_hdfs_network

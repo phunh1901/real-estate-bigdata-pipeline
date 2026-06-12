@@ -1,0 +1,10 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+RUN pip install kafka-python
+
+COPY crawler/data/ ./crawler/data/
+COPY kafka/ ./kafka/
+
+CMD ["python", "kafka/push_data_to_kafka.py"]

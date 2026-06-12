@@ -1,0 +1,45 @@
+services:
+  # Spark Consumer (Python application)
+  spark-consumer:
+    image: apache/spark-py:latest
+    container_name: spark_consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=real-estate-documents
+      - KAFKA_STARTING_OFFSET=earliest
+      - HDFS_NAMENODE=hdfs://namenode:9000
+      - HDFS_OUTPUT_PATH=/data/real-estate
+    ports:
+      - "4040:4040" # Spark Web UI
+    volumes:
+      - ./consumer.py:/opt/spark/apps/consumer.py
+      - ./config.py:/opt/spark/apps/config.py
+      - ./requirements.txt:/opt/spark/apps/requirements.txt
+      - spark_checkpoint:/tmp/spark-checkpoint
+      - spark_ivy_cache:/opt/spark/.ivy2
+    user: root
+    command: >
+      bash -c "
+        pip install -q -r /opt/spark/apps/requirements.txt &&
+        chown -R 185:0 /opt/spark/.ivy2 2>/dev/null || true &&
+        /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 --master local[*] --conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.ui.port=4040 /opt/spark/apps/consumer.py
+      "
+    networks:
+      - spark_network
+      - kafka_network
+      - hdfs_network
+    restart: unless-stopped
+
+volumes:
+  spark_checkpoint:
+  spark_ivy_cache:
+
+networks:
+  spark_network:
+    driver: bridge
+  kafka_network:
+    external: true
+    name: kafka_kafka_network # Tên network từ Kafka docker-compose
+  hdfs_network:
+    external: true
+    name: hdfs_hdfs_network # Tên network từ HDFS docker-compose
