@@ -1,0 +1,122 @@
+name: kafka-scale
+
+x-kafka-environment: &kafka-environment
+  CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:29093,2@kafka-2:29093,3@kafka-3:29093
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+  KAFKA_LISTENERS: EXTERNAL://0.0.0.0:9092,INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+x-kafka-common: &kafka-common
+  image: confluentinc/cp-kafka:7.5.0
+  restart: unless-stopped
+  networks:
+    - kafka_network
+  healthcheck:
+    test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:29092 --list"]
+    interval: 15s
+    timeout: 10s
+    retries: 10
+
+services:
+  kafka-1:
+    <<: *kafka-common
+    ports:
+      - "9092:9092"
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka-1:29092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_1_data:/var/lib/kafka/data
+    networks:
+      kafka_network:
+        aliases: ["kafka"]
+
+  kafka-2:
+    <<: *kafka-common
+    ports:
+      - "9094:9092"
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9094,INTERNAL://kafka-2:29092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_2_data:/var/lib/kafka/data
+
+  kafka-3:
+    <<: *kafka-common
+    ports:
+      - "9095:9092"
+    environment:
+      <<: *kafka-environment
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9095,INTERNAL://kafka-3:29092
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_3_data:/var/lib/kafka/data
+
+  loader:
+    profiles: ["loader"]
+    build:
+      context: ..
+      dockerfile: kafka/Dockerfile.loader
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
+      KAFKA_TOPIC: real-estate-documents
+      RAW_FILE: /app/crawler/data/all_raw_data.json
+      SENT_IDS_FILE: /app/state/sent_ids.json
+    volumes:
+      - ../crawler/data:/app/crawler/data:ro
+      - loader_state:/app/state
+    networks:
+      - kafka_network
+    restart: "no"
+
+  akhq:
+    image: tchiotludo/akhq:latest
+    ports:
+      - "8080:8080"
+    environment:
+      AKHQ_CONFIGURATION: |
+        akhq:
+          connections:
+            scaled-kafka:
+              properties:
+                bootstrap.servers: "kafka-1:29092,kafka-2:29092,kafka-3:29092"
+    networks:
+      - kafka_network
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kafka_1_data:
+  kafka_2_data:
+  kafka_3_data:
+  loader_state:
+
+networks:
+  kafka_network:
+    name: kafka_kafka_network

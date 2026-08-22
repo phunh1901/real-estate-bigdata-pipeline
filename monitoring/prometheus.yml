@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: kafka
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: spark
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:4040"]
+
+  - job_name: crawler
+    static_configs:
+      - targets: ["host.docker.internal:9102"]

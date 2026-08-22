@@ -1,0 +1,89 @@
+name: hdfs-scale
+
+x-datanode-environment: &datanode-environment
+  CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+  HDFS_CONF_dfs_replication: 2
+  HDFS_CONF_dfs_datanode_use_datanode_hostname: "true"
+  HDFS_CONF_dfs_client_use_datanode_hostname: "true"
+
+x-datanode-common: &datanode-common
+  image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+  platform: linux/amd64
+  depends_on:
+    namenode:
+      condition: service_healthy
+  networks:
+    - hdfs_network
+  restart: unless-stopped
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    platform: linux/amd64
+    hostname: namenode
+    environment:
+      CLUSTER_NAME: real-estate-scaled-cluster
+      CORE_CONF_fs_defaultFS: hdfs://namenode:9000
+      CORE_CONF_hadoop_http_staticuser_user: root
+      HDFS_CONF_dfs_replication: 2
+      HDFS_CONF_dfs_webhdfs_enabled: "true"
+      HDFS_CONF_dfs_permissions_enabled: "false"
+      HDFS_CONF_dfs_datanode_use_datanode_hostname: "true"
+      HDFS_CONF_dfs_client_use_datanode_hostname: "true"
+    ports:
+      - "9870:9870"
+      - "9000:9000"
+    volumes:
+      - hdfs_namenode_data:/hadoop/dfs/name
+    networks:
+      - hdfs_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9870"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  datanode-1:
+    <<: *datanode-common
+    hostname: datanode-1
+    environment:
+      <<: *datanode-environment
+      HDFS_CONF_dfs_datanode_http_address: 0.0.0.0:9864
+    ports:
+      - "9864:9864"
+    volumes:
+      - hdfs_datanode_1_data:/hadoop/dfs/data
+
+  datanode-2:
+    <<: *datanode-common
+    hostname: datanode-2
+    environment:
+      <<: *datanode-environment
+      HDFS_CONF_dfs_datanode_http_address: 0.0.0.0:9865
+    ports:
+      - "9865:9865"
+    volumes:
+      - hdfs_datanode_2_data:/hadoop/dfs/data
+
+  datanode-3:
+    <<: *datanode-common
+    hostname: datanode-3
+    environment:
+      <<: *datanode-environment
+      HDFS_CONF_dfs_datanode_http_address: 0.0.0.0:9867
+    ports:
+      - "9867:9867"
+    volumes:
+      - hdfs_datanode_3_data:/hadoop/dfs/data
+
+volumes:
+  hdfs_namenode_data:
+  hdfs_datanode_1_data:
+  hdfs_datanode_2_data:
+  hdfs_datanode_3_data:
+
+networks:
+  hdfs_network:
+    name: hdfs_hdfs_network

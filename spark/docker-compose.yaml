@@ -22,7 +22,7 @@ services:
       bash -c "
         pip install -q -r /opt/spark/apps/requirements.txt &&
         chown -R 185:0 /opt/spark/.ivy2 2>/dev/null || true &&
-        /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 --master local[*] --conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.ui.port=4040 /opt/spark/apps/consumer.py
+        /opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 --master local[*] --conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.ui.prometheus.enabled=true --conf spark.ui.port=4040 /opt/spark/apps/consumer.py
       "
     networks:
       - spark_network

@@ -7,4 +7,4 @@ COPY spark/ ./spark/
 
 RUN pip install -q -r spark/requirements.txt || true
 
-CMD ["bash", "-c", "/opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 --master local[*] --conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.ui.port=4040 spark/consumer.py"]
+CMD ["bash", "-c", "/opt/spark/bin/spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.1 --master local[*] --conf spark.sql.adaptive.enabled=true --conf spark.sql.adaptive.coalescePartitions.enabled=true --conf spark.ui.prometheus.enabled=true --conf spark.ui.port=4040 spark/consumer.py"]

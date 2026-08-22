@@ -129,6 +129,49 @@ $env:RUN_PIPELINE_INTEGRATION="1"
 python -m pytest -m integration tests/test_pipeline_e2e.py
 ```
 
+## Crawler liên tục
+
+Crawler hỗ trợ nhiều vùng, retry/backoff cho lỗi tạm thời, checkpoint JSON nguyên tử và metrics Prometheus. Ví dụ crawl Hà Nội theo chu kỳ 15 phút:
+
+```powershell
+python crawler/crawl.py --region 12000 --page-end 10 --watch --interval 900
+```
+
+Metrics crawler có tại `http://localhost:9102/metrics`. Có thể dùng `--metrics-port 0` để tắt. Hãy giữ tốc độ request phù hợp và tuân thủ điều khoản của nguồn dữ liệu.
+
+## Monitoring
+
+Sau khi Kafka và Spark đã chạy, khởi động Prometheus, Kafka Exporter và Grafana:
+
+```powershell
+docker compose -f monitoring/docker-compose.yml up -d
+```
+
+- Prometheus: [http://localhost:9090](http://localhost:9090)
+- Grafana: [http://localhost:3000](http://localhost:3000), tài khoản local mặc định `admin` / `admin`
+- Spark metrics: được scrape từ endpoint Prometheus của Spark UI tại cổng `4040`
+
+Đổi mật khẩu Grafana trước khi dùng ngoài môi trường phát triển.
+
+## Chế độ nhiều node
+
+Dự án có stack tùy chọn gồm 3 Kafka broker/controller (replication factor 3, min ISR 2) và 3 HDFS DataNode (replication 2). Dừng stack một node trước, không thêm `-v` để tránh xóa volume:
+
+```powershell
+docker compose -f kafka/docker-compose.yml down
+docker compose -f hdfs/docker-compose.yml down
+docker compose -f hdfs/docker-compose.scale.yml up -d
+docker compose -f kafka/docker-compose.scale.yml up -d
+```
+
+Kafka broker đầu tiên giữ network alias `kafka`, vì vậy Spark Compose hiện tại tiếp tục dùng được. Chạy loader trên cluster nhiều broker bằng:
+
+```powershell
+docker compose -f kafka/docker-compose.scale.yml --profile loader run --rm loader
+```
+
+Hai stack scale dùng project/volume riêng (`kafka-scale`, `hdfs-scale`) để không trộn dữ liệu với chế độ một node.
+
 ## 🗂️ Cấu trúc thư mục
 
 - `/crawler`: Chứa kịch bản thu thập dữ liệu bất động sản và thư mục `/data` chứa dữ liệu thô.
