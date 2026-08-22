@@ -109,7 +109,9 @@ Xóa hai biến môi trường trên hoặc đặt `DASHBOARD_DATA_SOURCE=hdfs` 
 Các biến cấu hình chính:
 
 - Spark: `KAFKA_BOOTSTRAP_SERVERS`, `HDFS_NAMENODE`, `HDFS_OUTPUT_PATH`, `HDFS_CHECKPOINT_PATH`.
-- Dashboard: `DASHBOARD_DATA_SOURCE`, `LOCAL_DATA_PATH`, `WEBHDFS_URL`.
+- Dashboard: `DASHBOARD_DATA_SOURCE`, `LOCAL_DATA_PATH`, `WEBHDFS_URL`, `DASHBOARD_CACHE_PATH`, `WEBHDFS_DATANODE_HOST`.
+
+Dashboard giữ manifest cache WebHDFS và chỉ tải file Parquet mới hoặc đã thay đổi. Nút **Xóa cache HDFS** dọn toàn bộ cache riêng của dataset; giá/diện tích thiếu được giữ là giá trị thiếu nên không làm lệch trung bình.
 
 ## Kiểm thử
 
