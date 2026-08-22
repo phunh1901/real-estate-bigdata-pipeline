@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 import os
 
-from kafka import KafkaProducer, KafkaConsumer, TopicPartition
 import config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -152,7 +151,10 @@ def save_sent_ids(sent_ids: set) -> None:
 
 
 # Kafka
-def create_producer() -> KafkaProducer:
+def create_producer():
+    # Lazy import giúp phần normalize/test không phụ thuộc Kafka client runtime.
+    from kafka import KafkaProducer
+
     return KafkaProducer(
         bootstrap_servers=config.KAFKA_BOOTSTRAP_SERVERS,
         client_id=config.KAFKA_CLIENT_ID,
@@ -177,7 +179,7 @@ def load_raw() -> dict:
 
 
 # Gửi data với dedup
-def send_all(producer: KafkaProducer, raw_map: dict) -> int:
+def send_all(producer, raw_map: dict) -> int:
     # Load IDs đã gửi từ lần chạy trước
     sent_ids = load_sent_ids()
 

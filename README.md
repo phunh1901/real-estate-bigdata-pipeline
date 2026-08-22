@@ -111,6 +111,22 @@ Các biến cấu hình chính:
 - Spark: `KAFKA_BOOTSTRAP_SERVERS`, `HDFS_NAMENODE`, `HDFS_OUTPUT_PATH`, `HDFS_CHECKPOINT_PATH`.
 - Dashboard: `DASHBOARD_DATA_SOURCE`, `LOCAL_DATA_PATH`, `WEBHDFS_URL`.
 
+## Kiểm thử
+
+Cài dependency phát triển và chạy unit/component integration test:
+
+```powershell
+pip install -r requirements-dev.txt
+python -m pytest -m "not integration"
+```
+
+E2E test gửi một bản ghi tạm qua Kafka và chờ Spark ghi nó vào HDFS. Khởi động toàn bộ pipeline trước, sau đó chạy:
+
+```powershell
+$env:RUN_PIPELINE_INTEGRATION="1"
+python -m pytest -m integration tests/test_pipeline_e2e.py
+```
+
 ## 🗂️ Cấu trúc thư mục
 
 - `/crawler`: Chứa kịch bản thu thập dữ liệu bất động sản và thư mục `/data` chứa dữ liệu thô.
