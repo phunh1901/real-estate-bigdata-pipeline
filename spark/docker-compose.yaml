@@ -9,13 +9,13 @@ services:
       - KAFKA_STARTING_OFFSET=earliest
       - HDFS_NAMENODE=hdfs://namenode:9000
       - HDFS_OUTPUT_PATH=/data/real-estate
+      - HDFS_CHECKPOINT_PATH=/checkpoints/real-estate
     ports:
       - "4040:4040" # Spark Web UI
     volumes:
       - ./consumer.py:/opt/spark/apps/consumer.py
       - ./config.py:/opt/spark/apps/config.py
       - ./requirements.txt:/opt/spark/apps/requirements.txt
-      - spark_checkpoint:/tmp/spark-checkpoint
       - spark_ivy_cache:/opt/spark/.ivy2
     user: root
     command: >
@@ -31,7 +31,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  spark_checkpoint:
   spark_ivy_cache:
 
 networks:

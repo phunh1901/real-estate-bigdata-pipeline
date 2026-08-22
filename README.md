@@ -19,7 +19,7 @@ Dự án được xây dựng với kiến trúc Microservices và luồng dữ 
 - **Visualization**: Streamlit, Plotly, Pandas
 - **DevOps/Deployment**: Docker, Docker Compose
 
-## 🚀 Hướng dẫn Cài đặt & Chạy dự án
+## 🚀 Hướng dẫn cài đặt và chạy dự án
 
 Yêu cầu hệ thống: Đã cài đặt **Docker**, **Docker Compose** và **Python 3.10+**.
 
@@ -29,59 +29,85 @@ Cài đặt tất cả các thư viện cần thiết bằng file `requirements.
 pip install -r requirements.txt
 ```
 
-### Bước 1: Khởi động hạ tầng Big Data (HDFS & Kafka)
+### Luồng khuyến nghị: Docker + HDFS
+
+Kafka, HDFS, Spark và loader chạy trong Docker; dashboard chạy trên máy host.
+
+#### Bước 1: Khởi động HDFS và Kafka
 
 Khởi động cụm HDFS:
 
 ```powershell
-cd hdfs
-docker-compose up -d
+docker compose -f hdfs/docker-compose.yml up -d
 ```
 
 Khởi động cụm Kafka (kèm Schema Registry, AKHQ):
 
 ```powershell
-cd ../kafka
-docker-compose up -d
+docker compose -f kafka/docker-compose.yml up -d
 ```
 
 _Đợi khoảng 30 giây - 1 phút để các container khởi động hoàn tất (Healthy)._
 
-### Bước 2: Đẩy dữ liệu vào hệ thống (Ingestion)
+#### Bước 2: Đẩy dữ liệu vào Kafka bằng loader
 
-Mở một terminal mới, đẩy dữ liệu thu thập được lên Kafka:
-
-```powershell
-cd kafka
-
-python traffic_ingestion.py
-```
-
-_(Bạn có thể chạy `python traffic_ingestion.py --reset` để đẩy lại toàn bộ dữ liệu từ đầu)._
-
-### Bước 3: Khởi chạy Spark Streaming Consumer
-
-Mở một terminal mới, chạy PySpark để lắng nghe Kafka và ghi dữ liệu xử lý vào HDFS:
+Loader dùng Python 3.10, kết nối Kafka qua mạng Docker tại `kafka:29092` và lưu trạng thái dedup trong Docker volume:
 
 ```powershell
-cd ../spark
-
-python consumer.py
+docker compose -f kafka/docker-compose.yml --profile loader run --rm loader
 ```
 
-_(Giữ Terminal này chạy để hệ thống liên tục xử lý dữ liệu realtime)._
+Để xóa trạng thái dedup và đẩy lại toàn bộ dữ liệu:
 
-### Bước 4: Khởi chạy Dashboard trực quan hóa
+```powershell
+docker compose -f kafka/docker-compose.yml --profile loader run --rm loader --reset
+```
+
+Nếu muốn chạy producer trực tiếp trên máy host, dùng `python kafka/traffic_ingestion.py`; cấu hình mặc định sẽ kết nối `localhost:9092`.
+
+#### Bước 3: Khởi chạy Spark Streaming Consumer
+
+Spark trong Docker sử dụng `kafka:29092` và ghi dữ liệu cùng checkpoint vào HDFS:
+
+```powershell
+docker compose -f spark/docker-compose.yaml up -d
+docker compose -f spark/docker-compose.yaml logs -f spark-consumer
+```
+
+#### Bước 4: Khởi chạy Dashboard
 
 Mở một terminal mới, khởi chạy Streamlit Web App:
 
 ```powershell
-cd ../dashboard
-
-streamlit run dashboard.py
+streamlit run dashboard/dashboard.py
 ```
 
 👉 Truy cập vào trình duyệt tại địa chỉ: [http://localhost:8501](http://localhost:8501)
+
+Dashboard mặc định đọc `hdfs://namenode:9000/data/real-estate` thông qua WebHDFS tại `localhost:9870`.
+
+### Chế độ chạy Spark local
+
+Nếu không muốn chạy Spark trong container, vẫn khởi động Kafka theo Bước 1 rồi chạy:
+
+```powershell
+python spark/consumer.py
+```
+
+Ở chế độ này Spark dùng `localhost:9092` và ghi Parquet vào `spark/output/real-estate`. Để dashboard đọc cùng dữ liệu local:
+
+```powershell
+$env:DASHBOARD_DATA_SOURCE="local"
+$env:LOCAL_DATA_PATH="$PWD\spark\output\real-estate"
+streamlit run dashboard/dashboard.py
+```
+
+Xóa hai biến môi trường trên hoặc đặt `DASHBOARD_DATA_SOURCE=hdfs` để quay lại chế độ HDFS.
+
+Các biến cấu hình chính:
+
+- Spark: `KAFKA_BOOTSTRAP_SERVERS`, `HDFS_NAMENODE`, `HDFS_OUTPUT_PATH`, `HDFS_CHECKPOINT_PATH`.
+- Dashboard: `DASHBOARD_DATA_SOURCE`, `LOCAL_DATA_PATH`, `WEBHDFS_URL`.
 
 ## 🗂️ Cấu trúc thư mục
 

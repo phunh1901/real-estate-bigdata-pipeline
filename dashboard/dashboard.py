@@ -1,70 +1,80 @@
 """
 Streamlit Dashboard - Thống kê bất động sản.
-Chạy: streamlit run dashboard.py  (cổng 8501)
+Chạy từ thư mục gốc: streamlit run dashboard/dashboard.py  (cổng 8501)
 """
+import os
 import pathlib
-import sys
+import tempfile
 import urllib.parse
 from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from pyarrow import fs
-
-
+import requests
 
 st.set_page_config(page_title="Real Estate Analytics", layout="wide")
 
+PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
+DATA_SOURCE = os.getenv("DASHBOARD_DATA_SOURCE", "hdfs").strip().lower()
+LOCAL_DATA_PATH = pathlib.Path(
+    os.getenv("LOCAL_DATA_PATH", str(PROJECT_ROOT / "spark" / "output" / "real-estate"))
+)
+WEBHDFS_URL = os.getenv(
+    "WEBHDFS_URL", "http://localhost:9870/webhdfs/v1/data/real-estate"
+).rstrip("/")
 
 
-import tempfile
-import os
-import requests
-
-# Load data bằng pandas tối ưu qua WebHDFS (Xử lý lỗi chặn NameNode/DataNode trên máy cục bộ)
+# Hỗ trợ hai chế độ thống nhất với Spark: HDFS (Docker, mặc định) hoặc local.
 @st.cache_data(ttl=300)
 def load_data() -> pd.DataFrame | None:
     try:
-        base_url = "http://localhost:9870/webhdfs/v1/data/real-estate"
-        
-        # Hàm đệ quy tải thư mục Parquet từ WebHDFS và tự động fix hostname
-        def download_hdfs(url, local_path):
-            res = requests.get(f"{url}?op=LISTSTATUS").json()
-            if "FileStatuses" not in res: return
-            for f in res["FileStatuses"]["FileStatus"]:
-                # Bỏ qua _SUCCESS
-                if f["pathSuffix"] == "_SUCCESS": continue
-                
-                # Cần encode URL cho thư mục phân mảnh có chứa tiếng Việt
-                item_url = f"{url}/{urllib.parse.quote(f['pathSuffix'])}"
-                
-                if f["type"] == "DIRECTORY":
-                    new_local = os.path.join(local_path, f["pathSuffix"])
-                    os.makedirs(new_local, exist_ok=True)
-                    download_hdfs(item_url, new_local)
-                elif f["type"] == "FILE" and f["pathSuffix"].endswith(".parquet"):
-                    # Chặn tự động redirect để sửa `datanode` thành `localhost`
-                    r1 = requests.get(f"{item_url}?op=OPEN", allow_redirects=False)
-                    if r1.status_code == 307:
-                        redirect_url = r1.headers["Location"].replace("http://datanode:", "http://localhost:")
-                        r2 = requests.get(redirect_url)
-                        if r2.status_code == 200:
-                            with open(os.path.join(local_path, f["pathSuffix"]), "wb") as out:
-                                out.write(r2.content)
-
-        # Tạo thư mục tạm để tải Parquet
-        temp_dir = tempfile.mkdtemp(prefix="real_estate_")
-        download_hdfs(base_url, temp_dir)
-
-        # Đọc dữ liệu từ file Parquet tải về
         required_cols = [
             "list_id", "title", "property_type", "district", 
             "price", "area_m2", "rooms", "url", "listing_type"
         ]
-        
-        # Pandas tự động gom data từ các thư mục phân mảnh (property_type=...)
-        raw_df = pd.read_parquet(temp_dir, engine="pyarrow", columns=required_cols)
+
+        if DATA_SOURCE == "local":
+            if not LOCAL_DATA_PATH.exists():
+                raise FileNotFoundError(f"Không tìm thấy dữ liệu local: {LOCAL_DATA_PATH}")
+            raw_df = pd.read_parquet(
+                LOCAL_DATA_PATH, engine="pyarrow", columns=required_cols
+            )
+        elif DATA_SOURCE == "hdfs":
+            # Tải dataset qua WebHDFS; DataNode quảng bá hostname nội bộ Docker.
+            def download_hdfs(url, local_path):
+                response = requests.get(f"{url}?op=LISTSTATUS", timeout=15)
+                response.raise_for_status()
+                statuses = response.json().get("FileStatuses", {}).get("FileStatus", [])
+                for item in statuses:
+                    if item["pathSuffix"] == "_SUCCESS":
+                        continue
+
+                    item_url = f"{url}/{urllib.parse.quote(item['pathSuffix'])}"
+                    if item["type"] == "DIRECTORY":
+                        new_local = os.path.join(local_path, item["pathSuffix"])
+                        os.makedirs(new_local, exist_ok=True)
+                        download_hdfs(item_url, new_local)
+                    elif item["type"] == "FILE" and item["pathSuffix"].endswith(".parquet"):
+                        first = requests.get(
+                            f"{item_url}?op=OPEN", allow_redirects=False, timeout=15
+                        )
+                        first.raise_for_status()
+                        redirect_url = first.headers["Location"].replace(
+                            "http://datanode:", "http://localhost:"
+                        )
+                        content = requests.get(redirect_url, timeout=30)
+                        content.raise_for_status()
+                        with open(os.path.join(local_path, item["pathSuffix"]), "wb") as out:
+                            out.write(content.content)
+
+            with tempfile.TemporaryDirectory(prefix="real_estate_") as temp_dir:
+                download_hdfs(WEBHDFS_URL, temp_dir)
+                raw_df = pd.read_parquet(
+                    temp_dir, engine="pyarrow", columns=required_cols
+                )
+        else:
+            raise ValueError("DASHBOARD_DATA_SOURCE phải là 'hdfs' hoặc 'local'")
         
         if raw_df.empty:
             return None

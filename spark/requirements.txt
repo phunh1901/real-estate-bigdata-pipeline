@@ -1,0 +1,2 @@
+# PySpark is provided by the apache/spark-py Docker image.
+# Keep this file for any extra Python-only dependencies used by the consumer.

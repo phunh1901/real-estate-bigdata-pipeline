@@ -15,8 +15,15 @@ import config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-RAW_FILE = Path(__file__).parent.parent / "crawler" / "data" / "all_raw_data.json"
-SENT_IDS_FILE = Path(__file__).parent / ".sent_ids.json"  # Track IDs đã gửi
+RAW_FILE = Path(
+    os.getenv(
+        "RAW_FILE",
+        str(Path(__file__).parent.parent / "crawler" / "data" / "all_raw_data.json"),
+    )
+)
+SENT_IDS_FILE = Path(
+    os.getenv("SENT_IDS_FILE", str(Path(__file__).parent / ".sent_ids.json"))
+)
 
 BATCH_SIZE = 100
 

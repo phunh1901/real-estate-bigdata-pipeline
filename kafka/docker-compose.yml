@@ -44,6 +44,27 @@ services:
       timeout: 10s
       retries: 5
 
+  # One-shot loader: docker compose --profile loader run --rm loader
+  loader:
+    profiles: ["loader"]
+    build:
+      context: ..
+      dockerfile: kafka/Dockerfile.loader
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: real-estate-documents
+      RAW_FILE: /app/crawler/data/all_raw_data.json
+      SENT_IDS_FILE: /app/state/sent_ids.json
+    volumes:
+      - ../crawler/data:/app/crawler/data:ro
+      - loader_state:/app/state
+    networks:
+      - kafka_network
+    restart: "no"
+
   # Schema Registry for Avro schemas
   schema-registry:
     image: confluentinc/cp-schema-registry:7.5.0
@@ -129,6 +150,7 @@ services:
 
 volumes:
   kafka_data:
+  loader_state:
 
 networks:
   kafka_network:
