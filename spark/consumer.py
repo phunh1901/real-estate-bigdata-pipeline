@@ -3,7 +3,6 @@ Spark Structured Streaming: Đọc tin BĐS từ Kafka -> Thống kê real-time 
 Cấu hình thích ứng đa môi trường (Local Windows / Docker Container HDFS).
 """
 import os
-import pathlib
 import traceback
 import sys
 
@@ -47,6 +46,64 @@ OUTPUT_URI = f"{config.HDFS_NAMENODE}{config.HDFS_OUTPUT_PATH}"
 CHECKPOINT_URI = f"{config.HDFS_NAMENODE}{config.HDFS_CHECKPOINT_PATH}"
 
 
+def _batch_uri(batch_id: int, staging: bool = False) -> str:
+    """Tạo đường dẫn ổn định cho một batch trong cùng filesystem với output."""
+    root = OUTPUT_URI.rstrip("/\\")
+    directory = "_staging" if staging else ""
+    suffix = f"batch_id={batch_id:020d}"
+    return f"{root}/{directory}/{suffix}" if directory else f"{root}/{suffix}"
+
+
+def _path_and_filesystem(spark, uri: str):
+    """Lấy Hadoop Path và đúng filesystem tương ứng với URI local/HDFS."""
+    path = spark._jvm.org.apache.hadoop.fs.Path(uri)
+    filesystem = path.getFileSystem(spark._jsc.hadoopConfiguration())
+    return path, filesystem
+
+
+def commit_batch_atomically(out_df, batch_id: int) -> int:
+    """Ghi một batch idempotent bằng staging + atomic rename.
+
+    `foreachBatch` có thể chạy lại cùng batch sau lỗi. Thư mục đích theo batch_id
+    đóng vai trò commit marker: tồn tại nghĩa là batch đã được commit đầy đủ.
+    """
+    spark = out_df.sparkSession
+    final_uri = _batch_uri(batch_id)
+    staging_uri = _batch_uri(batch_id, staging=True)
+    final_path, filesystem = _path_and_filesystem(spark, final_uri)
+    staging_path, _ = _path_and_filesystem(spark, staging_uri)
+
+    if filesystem.exists(final_path):
+        print(f"[Batch {batch_id}] Đã commit trước đó, bỏ qua an toàn: {final_uri}")
+        return 0
+
+    if filesystem.exists(staging_path):
+        if not filesystem.delete(staging_path, True):
+            raise RuntimeError(f"Không thể dọn staging cũ: {staging_uri}")
+
+    total = out_df.count()
+    if total == 0:
+        return 0
+
+    (out_df.write
+     .mode("overwrite")
+     .partitionBy("property_type")
+     .parquet(staging_uri))
+
+    filesystem.mkdirs(final_path.getParent())
+    if filesystem.rename(staging_path, final_path):
+        return total
+
+    # Một executor/query khác có thể đã commit trước trong lúc ghi staging.
+    if filesystem.exists(final_path):
+        filesystem.delete(staging_path, True)
+        return 0
+
+    raise RuntimeError(
+        f"Không thể commit nguyên tử batch {batch_id}: {staging_uri} -> {final_uri}"
+    )
+
+
 
 # Khởi tạo Spark Session đồng bộ hạ tầng
 def create_spark_session() -> SparkSession:
@@ -66,7 +123,7 @@ def create_spark_session() -> SparkSession:
 
 # Hàm xử lý logic cho từng Micro-Batch (Mỗi 10 giây)
 def process_and_save_batch(batch_df, batch_id):
-    """Phân tích thống kê dữ liệu real-time và ghi Parquet chống trùng lặp."""
+    """Phân tích micro-batch và commit Parquet theo batch một cách idempotent."""
     
     batch_df.cache()
     try:
@@ -121,54 +178,23 @@ def process_and_save_batch(batch_df, batch_id):
             print(f"\nThông số diện tích (m²): Trung bình {a['av']:.1f} | Nhỏ nhất {a['mn']:.0f} | Lớn nhất {a['mx']:.0f}")
 
 
-        # Khối chuẩn bị lưu trữ dữ liệu bền vững (Storage Layer)
-        spark = batch_df.sparkSession
-        
-        # Lặp trùng trong batch
+        # Loại trùng trong batch; loại trùng xuyên batch được state store xử lý.
         out_df = (batch_df
                   .dropDuplicates(["list_id"])
                   .withColumn("processed_at", current_timestamp()))
 
-        # LEFT ANTI JOIN
-        path_exists = False
-        try:
-            # Sử dụng hệ thống JVM của Spark để check trực tiếp xem đường dẫn có file nào chưa
-            fs = spark._jvm.org.apache.hadoop.fs.FileSystem.get(spark._jsc.hadoopConfiguration())
-            path_exists = fs.exists(spark._jvm.org.apache.hadoop.fs.Path(OUTPUT_URI))
-        except Exception:
-            import urllib.parse
-            parsed_url = urllib.parse.urlparse(OUTPUT_URI)
-            if parsed_url.scheme in ['hdfs', 'webhdfs']:
-                path_exists = False 
-            else:
-                path_exists = os.path.exists(OUTPUT_URI)
-
-        # Tiến hành loại bỏ trùng lặp nếu kho dữ liệu cũ đã được khởi tạo thành công
-        if path_exists:
-            try:
-                existing = spark.read.parquet(OUTPUT_URI).select("list_id")
-                out_df = out_df.join(existing, "list_id", "left_anti")
-            except Exception as read_err:
-                print(f"[Batch {batch_id}] Thư mục tồn tại nhưng lỗi đọc Parquet (Có thể trống): {read_err}")
-        else:
-            print(f"[Batch {batch_id}] Kho lưu trữ mới tinh hoặc chưa có dữ liệu. Tiến hành ghi nhận toàn bộ.")
-
-        n_new = out_df.count()
+        n_new = commit_batch_atomically(out_df, batch_id)
         if n_new == 0:
-            print("\n  Không có dữ liệu mới (Tất cả bài tin trong batch này đã tồn tại trong kho lưu trữ).")
+            print("\n  Không có dữ liệu mới hoặc batch đã được commit trước đó.")
             return
-
-        # Ghi data
-        (out_df.write
-         .mode("append")
-         .partitionBy("property_type")
-         .parquet(OUTPUT_URI))
         
-        print(f"\n Đã đồng bộ thành công {n_new} tin MỚI vào kho dữ liệu: {OUTPUT_URI}")
+        print(f"\n Đã commit nguyên tử {n_new} tin mới vào: {_batch_uri(batch_id)}")
 
     except Exception as e:
         print(f" Xảy ra sự cố xử lý batch {batch_id}: {e}")
         traceback.print_exc()
+        # Bắt buộc báo thất bại để Spark không checkpoint/advance offset của batch lỗi.
+        raise
     finally:
         # Giải phóng bộ nhớ RAM sau khi kết thúc một chu kỳ Micro-batch
         batch_df.unpersist()
@@ -195,10 +221,17 @@ def main():
             .select(
                 from_json(col("value").cast("string"), listing_schema).alias("d"),
                 col("timestamp").alias("kafka_ts"),
+                col("topic").alias("kafka_topic"),
+                col("partition").alias("kafka_partition"),
+                col("offset").alias("kafka_offset"),
             )
-            .select("d.*", "kafka_ts")
+            .select(
+                "d.*", "kafka_ts", "kafka_topic", "kafka_partition", "kafka_offset"
+            )
             # Bộ lọc sơ bộ loại bỏ tin rác khuyết tiêu đề hoặc mã định danh
             .filter(col("list_id").isNotNull() & col("title").isNotNull())
+            # State store + checkpoint bảo đảm một list_id chỉ đi qua một lần.
+            .dropDuplicates(["list_id"])
         )
 
         # Kích hoạt trạm đẩy dữ liệu (Stream Writer) theo chu kỳ 10 giây một lần

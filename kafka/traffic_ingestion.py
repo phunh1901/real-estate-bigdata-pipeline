@@ -141,11 +141,14 @@ def load_sent_ids() -> set:
 
 
 def save_sent_ids(sent_ids: set) -> None:
-    """Ghi lại danh sách list_id đã gửi ra file local."""
-    SENT_IDS_FILE.write_text(
+    """Ghi trạng thái dedup nguyên tử để tránh file hỏng khi process bị dừng."""
+    SENT_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = SENT_IDS_FILE.with_name(f"{SENT_IDS_FILE.name}.tmp")
+    temp_file.write_text(
         json.dumps(list(sent_ids), ensure_ascii=False),
         encoding="utf-8",
     )
+    os.replace(temp_file, SENT_IDS_FILE)
 
 
 # Kafka
@@ -210,7 +213,8 @@ def send_all(producer: KafkaProducer, raw_map: dict) -> int:
             try:
                 future = producer.send(
                     config.KAFKA_TOPIC,
-                    key=record["property_type"],
+                    # Cùng list_id luôn vào cùng partition và giữ đúng thứ tự cập nhật.
+                    key=record["list_id"],
                     value=record,
                 )
                 future.get(timeout=10)  # Chờ xác nhận từ broker

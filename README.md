@@ -86,6 +86,8 @@ streamlit run dashboard/dashboard.py
 
 Dashboard mặc định đọc `hdfs://namenode:9000/data/real-estate` thông qua WebHDFS tại `localhost:9870`.
 
+Mỗi Spark micro-batch được ghi vào staging và rename nguyên tử sang thư mục `batch_id=...`. Spark chỉ checkpoint khi callback thành công; state store loại trùng `list_id` xuyên batch, nên retry không tạo thêm dữ liệu trùng.
+
 ### Chế độ chạy Spark local
 
 Nếu không muốn chạy Spark trong container, vẫn khởi động Kafka theo Bước 1 rồi chạy:
